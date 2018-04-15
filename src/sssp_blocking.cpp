@@ -1,4 +1,6 @@
 /* -*- mode: c++ -*- */
+#define BLACK 27
+#define WHITE 12
 
 #include <stdio.h>
 #include <assert.h>
@@ -13,6 +15,7 @@
 
 const int INF = INT_MAX;
 int n_threads = 0;
+// std::atomic_int counter{0};
 
 void sssp_init(SimpleCSRGraphUII g, unsigned int src) {
   for(int i = 0; i < g.num_nodes; i++) {
@@ -20,66 +23,59 @@ void sssp_init(SimpleCSRGraphUII g, unsigned int src) {
   }
 }
 
-bool sssp(SimpleCSRGraphUII g, BlockingQueue *q, bool *done, int t_id) {
+bool sssp(SimpleCSRGraphUII g, BlockingQueue *q, int *marker, int t_id) {
   bool changed = false;
   int node;
 
   while (true) {
-    if (q->pop(node)) {
-      __atomic_store_n(&(done[t_id]), false, __ATOMIC_SEQ_CST);
-    } else {
-      __atomic_store_n(&(done[t_id]), true, __ATOMIC_SEQ_CST);
-    }
-
-    while(!__atomic_load_n(&(done[t_id]), __ATOMIC_SEQ_CST)) {
+    
+    while (q->pop(node)) {
+      marker[t_id] = BLACK;
+      //counter.exchange(0);
       for(unsigned int e = g.row_start[node]; e < g.row_start[node + 1]; e++) {
         
-        unsigned int dest = g.edge_dst[e];
-        int distance = __atomic_load_n(&(g.node_wt[node]), __ATOMIC_RELAXED) + g.edge_wt[e];
-        int prev_distance = __atomic_load_n(&(g.node_wt[dest]), __ATOMIC_RELAXED);
-         
-        if (distance == __atomic_load_n(&(g.node_wt[node]), __ATOMIC_RELAXED) + g.edge_wt[e]) {
-          if (prev_distance == __atomic_load_n(&(g.node_wt[dest]), __ATOMIC_RELAXED)) {
-            if(prev_distance > distance) {
-              __atomic_store_n(&(g.node_wt[dest]), distance, __ATOMIC_RELAXED);
-            	if(!q->push(dest)) {
-            	  fprintf(stderr, "ERROR: Out of queue space.\n");
-            	  exit(1);
-            	}
+        while (true) {
+          unsigned int dest = g.edge_dst[e];
+          int distance = __atomic_load_n(&(g.node_wt[node]), __ATOMIC_SEQ_CST) + g.edge_wt[e];
+          int prev_distance = __atomic_load_n(&(g.node_wt[dest]), __ATOMIC_SEQ_CST);
+
+          if (distance == __atomic_load_n(&(g.node_wt[node]), __ATOMIC_SEQ_CST) + g.edge_wt[e]) {
+            if (prev_distance == __atomic_load_n(&(g.node_wt[dest]), __ATOMIC_SEQ_CST)) {
+              if(prev_distance > distance) {
+                if (__atomic_compare_exchange_n(&(g.node_wt[dest]), &prev_distance, distance, true, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
+        	        if (!q->push(dest)) {
+        	          fprintf(stderr, "ERROR: Out of queue space.\n");
+        	          exit(1);
+                  }
+                  changed = true;
+                  break;
+                }
+              } else {
+                break;
+              }
             }
           }
-        }
-
-        if (q->pop(node)) {
-          __atomic_store_n(&(done[t_id]), false, __ATOMIC_SEQ_CST);
-        } else {
-          __atomic_store_n(&(done[t_id]), true, __ATOMIC_SEQ_CST);
-        }
-
-        /*
-        unsigned int dest = g.edge_dst[e];
-        int distance = g.node_wt[node] + g.edge_wt[e];
-  
-        int prev_distance = g.node_wt[dest];
-        
-        if(prev_distance > distance) {
-        	g.node_wt[dest] = distance;
-        	if(!q->push(dest)) {
-        	  fprintf(stderr, "ERROR: Out of queue space.\n");
-        	  exit(1);
-        	}
-        }
-        */ 
+        } // while
       }
     }
 
-    int i;
+    int i = 0;
     for (i = 0; i < n_threads; i++) {
-      if (!__atomic_load_n(&(done[i]), __ATOMIC_SEQ_CST)) break;
+      if (marker[t_id] == BLACK) break;
     }
-    
+
     if (i == n_threads) break;
+   
+    marker[t_id] = WHITE;
+
+//     while (true) {
+//       int prev = counter.load();
+//       if (counter.compare_exchange_weak(prev, prev + 1)) break;
+//     }
+//     if (counter.load() == n_threads) break;
+    
   }
+
 }
 
 void write_output(SimpleCSRGraphUII &g, const char *out) {
@@ -131,9 +127,9 @@ int main(int argc, char *argv[])
   int src = 0;
   n_threads = atoi(argv[3]);
   std::vector<std::thread> pool;
-  bool *done = new bool[n_threads];
+  int *marker = new int[n_threads];
   for (int i = 0; i < n_threads; i++) {
-    done[i] = false;
+    marker[i] = BLACK;
   }
 
   /* no need to parallelize this */
@@ -144,7 +140,7 @@ int main(int argc, char *argv[])
   sq.push(src);
 
   for (int i = 0; i < n_threads; i++) {
-    pool.push_back(std::thread(sssp, input, &sq, done, i));
+    pool.push_back(std::thread(sssp, input, &sq, marker, i));
   }
 
   for (auto &th: pool) {

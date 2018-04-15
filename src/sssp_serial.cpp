@@ -28,11 +28,11 @@ bool sssp(SimpleCSRGraphUII g, SerialQueue *q) {
       int prev_distance = g.node_wt[dest];
       
       if(prev_distance > distance) {
-	g.node_wt[dest] = distance;
-	if(!q->push(dest)) {
-	  fprintf(stderr, "ERROR: Out of queue space.\n");
-	  exit(1);
-	}
+      	g.node_wt[dest] = distance;
+      	if(!q->push(dest)) {
+      	  fprintf(stderr, "ERROR: Out of queue space.\n");
+      	  exit(1);
+      	}
       }
     }
   }
