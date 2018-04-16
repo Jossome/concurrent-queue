@@ -15,13 +15,13 @@ res = {"n_thread":[], "mean": [], "std": []}
 
 
 for i in range(len(l)):
-    time = re.findall(r"(\d+) ns", l[i])
+    time = re.findall(r"(\d+) ms", l[i])
 
     if l[i].find("differ") != -1:
         print(i, "error")
     res["n_thread"].append(l[i][:2].strip())
-    res["mean"].append(np.mean([int(x) for x in time]) / 1000000)
-    res["std"].append(np.std([int(x) for x in time]) / 1000000)
+    res["mean"].append(np.mean([int(x) for x in time]))
+    res["std"].append(np.std([int(x) for x in time]))
 
 df = pd.DataFrame(res)
 df = df[["n_thread", "mean", "std"]]
